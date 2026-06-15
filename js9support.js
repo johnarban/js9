@@ -37024,7 +37024,8 @@ fabric.CommonMethods = {
    * @return {String} Escaped version of a string
    */
   function escapeXml(string) {
-    return string.replace(/&/g, '&amp;')
+    // CVE-2026-27013: coerce to string so numeric values can be escaped too
+    return String(string).replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;')
       .replace(/</g, '&lt;')
@@ -42275,7 +42276,7 @@ fabric.ElementsParser = function(elements, callback, options, reviver, parsingOp
       transform[4] -= offsetX;
       transform[5] -= offsetY;
 
-      commonAttributes = 'id="SVGID_' + this.id +
+      commonAttributes = 'id="SVGID_' + fabric.util.string.escapeXml(this.id) +
                      '" gradientUnits="' + gradientUnits + '"';
       commonAttributes += ' gradientTransform="' + (withViewport ?
         options.additionalTransform + ' ' : '') + fabric.util.matrixToSVG(transform) + '" ';
@@ -42662,7 +42663,7 @@ fabric.ElementsParser = function(elements, callback, options, reviver, parsingOp
         patternImgSrc = patternSource.toDataURL();
       }
 
-      return '<pattern id="SVGID_' + this.id +
+      return '<pattern id="SVGID_' + fabric.util.string.escapeXml(this.id) +
                     '" x="' + patternOffsetX +
                     '" y="' + patternOffsetY +
                     '" width="' + patternWidth +
@@ -42670,7 +42671,7 @@ fabric.ElementsParser = function(elements, callback, options, reviver, parsingOp
                '<image x="0" y="0"' +
                       ' width="' + patternSource.width +
                       '" height="' + patternSource.height +
-                      '" xlink:href="' + patternImgSrc +
+                      '" xlink:href="' + fabric.util.string.escapeXml(patternImgSrc) +
                '"></image>\n' +
              '</pattern>\n';
     },
@@ -42851,7 +42852,7 @@ fabric.ElementsParser = function(elements, callback, options, reviver, parsingOp
       }
 
       return (
-        '<filter id="SVGID_' + this.id + '" y="-' + fBoxY + '%" height="' + (100 + 2 * fBoxY) + '%" ' +
+        '<filter id="SVGID_' + fabric.util.string.escapeXml(this.id) + '" y="-' + fBoxY + '%" height="' + (100 + 2 * fBoxY) + '%" ' +
           'x="-' + fBoxX + '%" width="' + (100 + 2 * fBoxX) + '%" ' + '>\n' +
           '\t<feGaussianBlur in="SourceAlpha" stdDeviation="' +
             toFixed(this.blur ? this.blur / 2 : 0, NUM_FRACTION_DIGITS) + '"></feGaussianBlur>\n' +
@@ -44206,7 +44207,7 @@ fabric.ElementsParser = function(elements, callback, options, reviver, parsingOp
       this._setSVGPreamble(markup, options);
       this._setSVGHeader(markup, options);
       if (this.clipPath) {
-        markup.push('<g clip-path="url(#' + this.clipPath.clipPathId + ')" >\n');
+        markup.push('<g clip-path="url(#' + fabric.util.string.escapeXml(this.clipPath.clipPathId) + ')" >\n');
       }
       this._setSVGBgOverlayColor(markup, 'background');
       this._setSVGBgOverlayImage(markup, 'backgroundImage', reviver);
@@ -44433,14 +44434,14 @@ fabric.ElementsParser = function(elements, callback, options, reviver, parsingOp
           (repeat === 'repeat-x' || repeat === 'no-repeat'
             ? filler.source.height
             : finalHeight),
-          '" fill="url(#SVGID_' + filler.id + ')"',
+          '" fill="url(#SVGID_' + fabric.util.string.escapeXml(filler.id) + ')"',
           '></rect>\n'
         );
       }
       else {
         markup.push(
           '<rect x="0" y="0" width="100%" height="100%" ',
-          'fill="', filler, '"',
+          'fill="', fabric.util.string.escapeXml(filler), '"',
           '></rect>\n'
         );
       }
@@ -51570,7 +51571,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
         'opacity: ', opacity, ';',
         filter,
         visibility
-      ].join('');
+      ].map(function(v) { return fabric.util.string.escapeXml(v); }).join('');
     },
 
     /**
@@ -51608,7 +51609,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
         fill,
         deltaY,
         useWhiteSpace ? 'white-space: pre; ' : ''
-      ].join('');
+      ].map(function(v) { return fabric.util.string.escapeXml(v); }).join('');
     },
 
     /**
@@ -51627,7 +51628,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
      * @return {String}
      */
     getSvgFilter: function() {
-      return this.shadow ? 'filter: url(#SVGID_' + this.shadow.id + ');' : '';
+      return this.shadow ? 'filter: url(#SVGID_' + fabric.util.string.escapeXml(this.shadow.id) + ');' : '';
     },
 
     /**
@@ -51636,8 +51637,8 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
      */
     getSvgCommons: function() {
       return [
-        this.id ? 'id="' + this.id + '" ' : '',
-        this.clipPath ? 'clip-path="url(#' + this.clipPath.clipPathId + ')" ' : '',
+        this.id ? 'id="' + fabric.util.string.escapeXml(this.id) + '" ' : '',
+        this.clipPath ? 'clip-path="url(#' + fabric.util.string.escapeXml(this.clipPath.clipPathId) + ')" ' : '',
       ].join('');
     },
 
@@ -51766,7 +51767,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
     },
 
     addPaintOrder: function() {
-      return this.paintFirst !== 'fill' ? ' paint-order="' + this.paintFirst + '" ' : '';
+      return this.paintFirst !== 'fill' ? ' paint-order="' + fabric.util.string.escapeXml(this.paintFirst) + '" ' : '';
     }
   });
 })();
@@ -52849,7 +52850,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
         svgString = [
           '<circle ', 'COMMON_PARTS',
           'cx="' + x + '" cy="' + y + '" ',
-          'r="', this.radius,
+          'r="', fabric.util.string.escapeXml(this.radius),
           '" />\n'
         ];
       }
@@ -53178,8 +53179,8 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
       return [
         '<ellipse ', 'COMMON_PARTS',
         'cx="0" cy="0" ',
-        'rx="', this.rx,
-        '" ry="', this.ry,
+        'rx="', fabric.util.string.escapeXml(this.rx),
+        '" ry="', fabric.util.string.escapeXml(this.ry),
         '" />\n'
       ];
     },
@@ -53380,8 +53381,8 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
       return [
         '<rect ', 'COMMON_PARTS',
         'x="', x, '" y="', y,
-        '" rx="', this.rx, '" ry="', this.ry,
-        '" width="', this.width, '" height="', this.height,
+        '" rx="', fabric.util.string.escapeXml(this.rx), '" ry="', fabric.util.string.escapeXml(this.ry),
+        '" width="', fabric.util.string.escapeXml(this.width), '" height="', fabric.util.string.escapeXml(this.height),
         '" />\n'
       ];
     },
@@ -53606,7 +53607,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
         );
       }
       return [
-        '<' + this.type + ' ', 'COMMON_PARTS',
+        '<' + fabric.util.string.escapeXml(this.type) + ' ', 'COMMON_PARTS',
         'points="', points.join(''),
         '" />\n'
       ];
@@ -54697,7 +54698,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
      */
     getSvgStyles: function() {
       var opacity = typeof this.opacity !== 'undefined' && this.opacity !== 1 ?
-            'opacity: ' + this.opacity + ';' : '',
+            'opacity: ' + fabric.util.string.escapeXml(this.opacity) + ';' : '',
           visibility = this.visible ? '' : ' visibility: hidden;';
       return [
         opacity,
@@ -55216,7 +55217,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
         var clipPathId = fabric.Object.__uid++;
         svgString.push(
           '<clipPath id="imageCrop_' + clipPathId + '">\n',
-          '\t<rect x="' + x + '" y="' + y + '" width="' + this.width + '" height="' + this.height + '" />\n',
+          '\t<rect x="' + x + '" y="' + y + '" width="' + fabric.util.string.escapeXml(this.width) + '" height="' + fabric.util.string.escapeXml(this.height) + '" />\n',
           '</clipPath>\n'
         );
         clipPath = ' clip-path="url(#imageCrop_' + clipPathId + ')" ';
@@ -55224,7 +55225,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
       if (!this.imageSmoothing) {
         imageRendering = '" image-rendering="optimizeSpeed';
       }
-      imageMarkup.push('\t<image ', 'COMMON_PARTS', 'xlink:href="', this.getSvgSrc(true),
+      imageMarkup.push('\t<image ', 'COMMON_PARTS', 'xlink:href="', fabric.util.string.escapeXml(this.getSvgSrc(true)),
         '" x="', x - this.cropX, '" y="', y - this.cropY,
         // we're essentially moving origin of transformation from top/left corner to the center of the shape
         // by wrapping it in container <g> element with actual transformation, then offsetting object to the top/left
@@ -55241,7 +55242,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
         strokeSvg = [
           '\t<rect ',
           'x="', x, '" y="', y,
-          '" width="', this.width, '" height="', this.height,
+          '" width="', fabric.util.string.escapeXml(this.width), '" height="', fabric.util.string.escapeXml(this.height),
           '" style="', this.getSvgStyles(),
           '"/>\n'
         ];
@@ -64460,10 +64461,10 @@ fabric.util.object.extend(fabric.IText.prototype, /** @lends fabric.IText.protot
       return [
         textAndBg.textBgRects.join(''),
         '\t\t<text xml:space="preserve" ',
-        (this.fontFamily ? 'font-family="' + this.fontFamily.replace(/"/g, '\'') + '" ' : ''),
-        (this.fontSize ? 'font-size="' + this.fontSize + '" ' : ''),
-        (this.fontStyle ? 'font-style="' + this.fontStyle + '" ' : ''),
-        (this.fontWeight ? 'font-weight="' + this.fontWeight + '" ' : ''),
+        (this.fontFamily ? 'font-family="' + fabric.util.string.escapeXml(this.fontFamily.replace(/"/g, '\'')) + '" ' : ''),
+        (this.fontSize ? 'font-size="' + fabric.util.string.escapeXml(this.fontSize) + '" ' : ''),
+        (this.fontStyle ? 'font-style="' + fabric.util.string.escapeXml(this.fontStyle) + '" ' : ''),
+        (this.fontWeight ? 'font-weight="' + fabric.util.string.escapeXml(this.fontWeight) + '" ' : ''),
         (textDecoration ? 'text-decoration="' + textDecoration + '" ' : ''),
         'style="', this.getSvgStyles(noShadow), '"', this.addPaintOrder(), ' >',
         textAndBg.textSpans.join(''),
@@ -64619,7 +64620,7 @@ fabric.util.object.extend(fabric.IText.prototype, /** @lends fabric.IText.protot
     _getFillAttributes: function(value) {
       var fillColor = (value && typeof value === 'string') ? new fabric.Color(value) : '';
       if (!fillColor || !fillColor.getSource() || fillColor.getAlpha() === 1) {
-        return 'fill="' + value + '"';
+        return 'fill="' + fabric.util.string.escapeXml(value) + '"';
       }
       return 'opacity="' + fillColor.getAlpha() + '" fill="' + fillColor.setAlpha(1).toRgb() + '"';
     },

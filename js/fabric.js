@@ -1,1 +1,1 @@
-fabric-v5.2.1.js
+fabric-v5.2.1-svgfix.js
