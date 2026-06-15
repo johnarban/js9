@@ -28296,12 +28296,16 @@ JS9.init = function(){
 	$.extend(true, JS9.Fabric.opts, JS9.fabricOpts);
 	// incorporate our fabric defaults into fabric itself
 	for( key of Object.keys(JS9.Fabric.opts) ){
+	    // the "canvas" key is a canvas-level option (e.g. {selection:true}),
+	    // not a per-object property. In fabric v6+ putting it on objects
+	    // breaks add(): _onObjectAdded calls obj.canvas.remove() whenever
+	    // obj.canvas is set, so a non-canvas value throws
+	    // "canvas.remove is not a function".
+	    if( key === "canvas" ){ continue; }
 	    fabric.Object.prototype[key] = JS9.Fabric.opts[key];
 	    // fabric v6+ reads per-instance defaults from ownDefaults, not from
 	    // the prototype, so global shape defaults must be set there too.
-	    // (the "canvas" key is a canvas-level option, not a shape default)
-	    if( key !== "canvas" &&
-		fabric.InteractiveFabricObject &&
+	    if( fabric.InteractiveFabricObject &&
 		fabric.InteractiveFabricObject.ownDefaults ){
 		fabric.InteractiveFabricObject.ownDefaults[key] =
 		    JS9.Fabric.opts[key];
