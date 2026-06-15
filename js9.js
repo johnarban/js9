@@ -11930,6 +11930,20 @@ fabric.patch_version = parseFloat(fabric.version.split(".")[2]);
 // We restore them here so the rest of the JS9 code can stay unchanged.
 // ---------------------------------------------------------------------
 if( fabric.major_version >= 6 ){
+    // fabric v6 renamed the active-selection type from "activeSelection" to
+    // "activeselection" (the "type" getter lowercases the class name). JS9
+    // (and plugins) compare obj.type against the old camelCase string in ~20
+    // places, including the region geometry path (_selectShapes / getgroups /
+    // _updateShape), so multi-selected regions would otherwise get the wrong
+    // coordinates. fabric's own isActiveSelection() tests for
+    // "multiSelectionStacking" in the object, not the type string, so
+    // restoring the old value via the getter is safe.
+    Object.defineProperty(fabric.ActiveSelection.prototype, "type", {
+	get(){ return "activeSelection"; },
+	set(){ /* fabric warns and ignores; keep the same no-op */ },
+	configurable: true,
+	enumerable: true
+    });
     // fabric.isTouchSupported was removed: recompute it ourselves
     if( fabric.isTouchSupported === undefined ){
 	fabric.isTouchSupported =
