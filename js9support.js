@@ -34251,7 +34251,9 @@ fabric.minCacheSideLimit = 256;
 /**
  * Cache Object for widths of chars in text rendering.
  */
-fabric.charWidthsCache = { };
+// null-prototype: a user-controlled fontFamily of "__proto__"/"constructor"
+// must not reach Object.prototype (prototype pollution, fabric.js #10782)
+fabric.charWidthsCache = Object.create(null);
 
 /**
  * if webgl is enabled and available, textureSize will determine the size
@@ -35770,7 +35772,7 @@ fabric.CommonMethods = {
     clearFabricFontCache: function(fontFamily) {
       fontFamily = (fontFamily || '').toLowerCase();
       if (!fontFamily) {
-        fabric.charWidthsCache = { };
+        fabric.charWidthsCache = Object.create(null);
       }
       else if (fabric.charWidthsCache[fontFamily]) {
         delete fabric.charWidthsCache[fontFamily];
@@ -42328,11 +42330,18 @@ fabric.ElementsParser = function(elements, callback, options, reviver, parsingOp
 
       for (i = 0, len = colorStops.length; i < len; i++) {
         var colorStop = colorStops[i];
+        // CVE-2026-44311: stop-color/opacity are written into a CSS style. A
+        // safe value passes through (escaped); anything else is normalized
+        // through the Color parser, exactly as fabric.js 7.4.0 does.
+        var rawStopColor = '' + colorStop.color;
+        var safeStopColor = fabric.util.isSafeSvgStyleValue(rawStopColor) ?
+          rawStopColor : new fabric.Color(rawStopColor).toRgba();
         markup.push(
           '<stop ',
           'offset="', (colorStop.offset * 100) + '%',
-          '" style="stop-color:', colorStop.color,
-          (typeof colorStop.opacity !== 'undefined' ? ';stop-opacity: ' + colorStop.opacity : ';'),
+          '" style="stop-color:', fabric.util.string.escapeXml(safeStopColor),
+          (typeof colorStop.opacity !== 'undefined' ?
+            ';stop-opacity: ' + fabric.util.getSafeSvgStyleNumber(colorStop.opacity, '1') : ';'),
           '"/>\n'
         );
       }
@@ -51535,6 +51544,29 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
     }
   }
 
+  // CVE-2026-44311: escapeXml is not enough for values written inside a CSS
+  // style="..." attribute -- ";", "url(", "expression(", "javascript:",
+  // "@import", comments, etc. inject CSS without any XML-special chars. These
+  // helpers coerce style values to a safe number or a safe token (mirrors the
+  // fabric.js 7.4.0 fix). Not using the "u" regex flag, for compatibility.
+  var unsafeSvgStyleValueRegex =
+    /[\0-\x1F\x7F;<>\\]|\/\*|\*\/|url\s*\(|expression\s*\(|(?:java|vb)script\s*:|data\s*:|@import\b/i;
+  function isSafeSvgStyleValue(value) {
+    return typeof value === 'string' && value.trim().length > 0 &&
+      !unsafeSvgStyleValueRegex.test(value);
+  }
+  function getSafeSvgStyleNumber(value, fallback) {
+    var numeric = Number(value);
+    return isFinite(numeric) ? ('' + numeric) : (fallback === undefined ? '' : fallback);
+  }
+  function getSafeSvgStyleToken(value, fallback) {
+    return isSafeSvgStyleValue(value) ? value : (fallback === undefined ? '' : fallback);
+  }
+  // share with other export scopes (Text/Group/Gradient live in separate IIFEs)
+  fabric.util.getSafeSvgStyleNumber = getSafeSvgStyleNumber;
+  fabric.util.getSafeSvgStyleToken = getSafeSvgStyleToken;
+  fabric.util.isSafeSvgStyleValue = isSafeSvgStyleValue;
+
   var toFixed = fabric.util.toFixed;
 
   fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prototype */ {
@@ -51545,14 +51577,17 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
      */
     getSvgStyles: function(skipShadow) {
 
-      var fillRule = this.fillRule ? this.fillRule : 'nonzero',
-          strokeWidth = this.strokeWidth ? this.strokeWidth : '0',
-          strokeDashArray = this.strokeDashArray ? this.strokeDashArray.join(' ') : 'none',
-          strokeDashOffset = this.strokeDashOffset ? this.strokeDashOffset : '0',
-          strokeLineCap = this.strokeLineCap ? this.strokeLineCap : 'butt',
-          strokeLineJoin = this.strokeLineJoin ? this.strokeLineJoin : 'miter',
-          strokeMiterLimit = this.strokeMiterLimit ? this.strokeMiterLimit : '4',
-          opacity = typeof this.opacity !== 'undefined' ? this.opacity : '1',
+      // CVE-2026-44311: sanitize every value written into the style attribute
+      var fillRule = this.fillRule ? getSafeSvgStyleToken(this.fillRule, 'nonzero') : 'nonzero',
+          strokeWidth = this.strokeWidth ? getSafeSvgStyleNumber(this.strokeWidth, '0') : '0',
+          strokeDashArray = (this.strokeDashArray &&
+            this.strokeDashArray.every(function(v){ return isFinite(Number(v)); })) ?
+            this.strokeDashArray.join(' ') : 'none',
+          strokeDashOffset = this.strokeDashOffset ? getSafeSvgStyleNumber(this.strokeDashOffset, '0') : '0',
+          strokeLineCap = this.strokeLineCap ? getSafeSvgStyleToken(this.strokeLineCap, 'butt') : 'butt',
+          strokeLineJoin = this.strokeLineJoin ? getSafeSvgStyleToken(this.strokeLineJoin, 'miter') : 'miter',
+          strokeMiterLimit = this.strokeMiterLimit ? getSafeSvgStyleNumber(this.strokeMiterLimit, '4') : '4',
+          opacity = typeof this.opacity !== 'undefined' ? getSafeSvgStyleNumber(this.opacity, '1') : '1',
           visibility = this.visible ? '' : ' visibility: hidden;',
           filter = skipShadow ? '' : this.getSvgFilter(),
           fill = getSvgColorString('fill', this.fill),
@@ -51582,18 +51617,20 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
      */
     getSvgSpanStyles: function(style, useWhiteSpace) {
       var term = '; ';
-      var fontFamily = style.fontFamily ?
-        'font-family: ' + (((style.fontFamily.indexOf('\'') === -1 && style.fontFamily.indexOf('"') === -1) ?
-          '\'' + style.fontFamily  + '\'' : style.fontFamily)) + term : '';
-      var strokeWidth = style.strokeWidth ? 'stroke-width: ' + style.strokeWidth + term : '',
+      // CVE-2026-44311: sanitize each user-controlled value placed in the CSS
+      var safeFamily = getSafeSvgStyleToken(style.fontFamily, '');
+      var fontFamily = safeFamily ?
+        'font-family: ' + ((safeFamily.indexOf('\'') === -1 && safeFamily.indexOf('"') === -1) ?
+          '\'' + safeFamily  + '\'' : safeFamily) + term : '';
+      var strokeWidth = style.strokeWidth ? 'stroke-width: ' + getSafeSvgStyleNumber(style.strokeWidth, '0') + term : '',
           fontFamily = fontFamily,
-          fontSize = style.fontSize ? 'font-size: ' + style.fontSize + 'px' + term : '',
-          fontStyle = style.fontStyle ? 'font-style: ' + style.fontStyle + term : '',
-          fontWeight = style.fontWeight ? 'font-weight: ' + style.fontWeight + term : '',
+          fontSize = style.fontSize ? 'font-size: ' + getSafeSvgStyleNumber(style.fontSize, '0') + 'px' + term : '',
+          fontStyle = style.fontStyle ? 'font-style: ' + getSafeSvgStyleToken(style.fontStyle, 'normal') + term : '',
+          fontWeight = style.fontWeight ? 'font-weight: ' + getSafeSvgStyleToken('' + style.fontWeight, 'normal') + term : '',
           fill = style.fill ? getSvgColorString('fill', style.fill) : '',
           stroke = style.stroke ? getSvgColorString('stroke', style.stroke) : '',
           textDecoration = this.getSvgTextDecoration(style),
-          deltaY = style.deltaY ? 'baseline-shift: ' + (-style.deltaY) + '; ' : '';
+          deltaY = style.deltaY ? 'baseline-shift: ' + getSafeSvgStyleNumber(-style.deltaY, '0') + '; ' : '';
       if (textDecoration) {
         textDecoration = 'text-decoration: ' + textDecoration + term;
       }
@@ -54698,7 +54735,7 @@ fabric.util.object.extend(fabric.Object.prototype, /** @lends fabric.Object.prot
      */
     getSvgStyles: function() {
       var opacity = typeof this.opacity !== 'undefined' && this.opacity !== 1 ?
-            'opacity: ' + fabric.util.string.escapeXml(this.opacity) + ';' : '',
+            'opacity: ' + fabric.util.getSafeSvgStyleNumber(this.opacity, '1') + ';' : '',
           visibility = this.visible ? '' : ' visibility: hidden;';
       return [
         opacity,
@@ -60631,7 +60668,9 @@ fabric.Image.filters.BaseFilter.fromObject = function(object, callback) {
     getFontCache: function(decl) {
       var fontFamily = decl.fontFamily.toLowerCase();
       if (!fabric.charWidthsCache[fontFamily]) {
-        fabric.charWidthsCache[fontFamily] = { };
+        // null-prototype (see fabric.charWidthsCache init): keep the per-family
+        // cache un-polluteable too
+        fabric.charWidthsCache[fontFamily] = Object.create(null);
       }
       var cache = fabric.charWidthsCache[fontFamily],
           cacheProp = decl.fontStyle.toLowerCase() + '_' + (decl.fontWeight + '').toLowerCase();
