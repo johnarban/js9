@@ -11923,6 +11923,86 @@ fabric.major_version = parseFloat(fabric.version.split(".")[0]);
 fabric.minor_version = parseFloat(fabric.version.split(".")[1]);
 fabric.patch_version = parseFloat(fabric.version.split(".")[2]);
 
+// ---------------------------------------------------------------------
+// fabric v6/v7 compatibility shims
+//
+// fabric 6 was a full rewrite that removed several APIs JS9 relies on.
+// We restore them here so the rest of the JS9 code can stay unchanged.
+// ---------------------------------------------------------------------
+if( fabric.major_version >= 6 ){
+    // fabric.isTouchSupported was removed: recompute it ourselves
+    if( fabric.isTouchSupported === undefined ){
+	fabric.isTouchSupported =
+	    (typeof window !== "undefined" && "ontouchstart" in window) ||
+	    (typeof navigator !== "undefined" &&
+	     (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0));
+    }
+    // the hasRotatingPoint object flag was removed: the rotation handle is
+    // now the "mtr" control. Map the old flag onto control visibility so
+    // every existing get/set of hasRotatingPoint keeps working.
+    if( !Object.getOwnPropertyDescriptor(fabric.Object.prototype,
+					  "hasRotatingPoint") ){
+	Object.defineProperty(fabric.Object.prototype, "hasRotatingPoint", {
+	    get(){
+		return this.isControlVisible ? this.isControlVisible("mtr") : true;
+	    },
+	    set(v){
+		if( this.setControlVisible ){
+		    this.setControlVisible("mtr", !!v);
+		}
+	    },
+	    configurable: true,
+	    enumerable: true
+	});
+    }
+    // ActiveSelection.addWithUpdate() was removed: multiSelectAdd() is the
+    // v6 way to add an object to an active selection (it keeps canvas-plane
+    // coordinates and respects stacking order).
+    if( !fabric.ActiveSelection.prototype.addWithUpdate ){
+	fabric.ActiveSelection.prototype.addWithUpdate = function(obj){
+	    return this.multiSelectAdd(obj);
+	};
+    }
+    // ActiveSelection.toGroup() was removed: dissolve the selection (which
+    // restores each child to canvas-plane coordinates) and wrap the objects
+    // in a real Group at their current positions.
+    if( !fabric.ActiveSelection.prototype.toGroup ){
+	fabric.ActiveSelection.prototype.toGroup = function(){
+	    const canvas = this.canvas;
+	    const objects = this.getObjects().concat();
+	    if( !canvas ){
+		return new fabric.Group(objects);
+	    }
+	    canvas.discardActiveObject();
+	    canvas.remove(...objects);
+	    const group = new fabric.Group(objects);
+	    canvas.add(group);
+	    canvas.setActiveObject(group);
+	    canvas.requestRenderAll();
+	    return group;
+	};
+    }
+    // Group.toActiveSelection() was removed: pull the children out of the
+    // group (which restores their canvas-plane coordinates), drop the empty
+    // group, and wrap the children in an ActiveSelection.
+    if( !fabric.Group.prototype.toActiveSelection ){
+	fabric.Group.prototype.toActiveSelection = function(){
+	    const canvas = this.canvas;
+	    if( !canvas ){ return undefined; }
+	    const objects = this.getObjects().concat();
+	    this.removeAll();
+	    canvas.remove(this);
+	    objects.forEach((obj) => { canvas.add(obj); });
+	    const selection = new fabric.ActiveSelection(objects, {
+		canvas: canvas
+	    });
+	    canvas.setActiveObject(selection);
+	    canvas.requestRenderAll();
+	    return selection;
+	};
+    }
+}
+
 // fabric sub-object to hold fabric routines
 JS9.Fabric = {};
 
@@ -28217,6 +28297,15 @@ JS9.init = function(){
 	// incorporate our fabric defaults into fabric itself
 	for( key of Object.keys(JS9.Fabric.opts) ){
 	    fabric.Object.prototype[key] = JS9.Fabric.opts[key];
+	    // fabric v6+ reads per-instance defaults from ownDefaults, not from
+	    // the prototype, so global shape defaults must be set there too.
+	    // (the "canvas" key is a canvas-level option, not a shape default)
+	    if( key !== "canvas" &&
+		fabric.InteractiveFabricObject &&
+		fabric.InteractiveFabricObject.ownDefaults ){
+		fabric.InteractiveFabricObject.ownDefaults[key] =
+		    JS9.Fabric.opts[key];
+	    }
 	}
     }
     delete JS9.fabricOpts;
