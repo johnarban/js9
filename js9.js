@@ -12015,6 +12015,47 @@ if( fabric.major_version >= 6 ){
 	    return selection;
 	};
     }
+    // canvas.setWidth(w)/setHeight(h) were removed: folded into setDimensions
+    // (which preserves the other dimension and recomputes the offset itself).
+    if( !fabric.StaticCanvas.prototype.setWidth ){
+	fabric.StaticCanvas.prototype.setWidth = function(value){
+	    return this.setDimensions({ width: value });
+	};
+    }
+    if( !fabric.StaticCanvas.prototype.setHeight ){
+	fabric.StaticCanvas.prototype.setHeight = function(value){
+	    return this.setDimensions({ height: value });
+	};
+    }
+    // object stacking moved onto the canvas and was renamed:
+    // canvas.sendToBack(obj)    -> canvas.sendObjectToBack(obj)
+    // canvas.bringToFront(obj)  -> canvas.bringObjectToFront(obj)
+    if( !fabric.StaticCanvas.prototype.sendToBack ){
+	fabric.StaticCanvas.prototype.sendToBack = function(obj){
+	    return this.sendObjectToBack(obj);
+	};
+    }
+    if( !fabric.StaticCanvas.prototype.bringToFront ){
+	fabric.StaticCanvas.prototype.bringToFront = function(obj){
+	    return this.bringObjectToFront(obj);
+	};
+    }
+    // obj.sendToBack() (object method) was removed: route through its canvas
+    if( !fabric.Object.prototype.sendToBack ){
+	fabric.Object.prototype.sendToBack = function(){
+	    if( this.canvas ){ this.canvas.sendObjectToBack(this); }
+	    return this;
+	};
+    }
+    // fabric.devicePixelRatio was removed from the namespace (now
+    // fabric.config.devicePixelRatio). The magnifier still multiplies by the
+    // old name; without this it becomes NaN and drawImage silently drops the
+    // magnifier's region overlay.
+    if( fabric.devicePixelRatio === undefined ){
+	fabric.devicePixelRatio =
+	    (fabric.config && fabric.config.devicePixelRatio) ||
+	    (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    }
 }
 
 // fabric sub-object to hold fabric routines
