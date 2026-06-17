@@ -12030,20 +12030,35 @@ if( fabric.major_version >= 6 ){
     // object stacking moved onto the canvas and was renamed:
     // canvas.sendToBack(obj)    -> canvas.sendObjectToBack(obj)
     // canvas.bringToFront(obj)  -> canvas.bringObjectToFront(obj)
+    // NB: fabric's sendObjectToBack/bringObjectToFront UNSHIFT/PUSH the object
+    // into canvas._objects even if it isn't already there. An ActiveSelection
+    // lives in canvas._activeObject, NOT _objects, so calling these on it (e.g.
+    // JS9's sortOverlapping reorders the modified object, which can be the
+    // active selection) would inject it into _objects -> a leftover, selectable
+    // "selection frame" orphan after the selection is moved and cleared. So we
+    // only reorder objects that are actually members of the canvas.
     if( !fabric.StaticCanvas.prototype.sendToBack ){
 	fabric.StaticCanvas.prototype.sendToBack = function(obj){
-	    return this.sendObjectToBack(obj);
+	    if( obj && this.getObjects().indexOf(obj) !== -1 ){
+		this.sendObjectToBack(obj);
+	    }
+	    return this;
 	};
     }
     if( !fabric.StaticCanvas.prototype.bringToFront ){
 	fabric.StaticCanvas.prototype.bringToFront = function(obj){
-	    return this.bringObjectToFront(obj);
+	    if( obj && this.getObjects().indexOf(obj) !== -1 ){
+		this.bringObjectToFront(obj);
+	    }
+	    return this;
 	};
     }
     // obj.sendToBack() (object method) was removed: route through its canvas
     if( !fabric.Object.prototype.sendToBack ){
 	fabric.Object.prototype.sendToBack = function(){
-	    if( this.canvas ){ this.canvas.sendObjectToBack(this); }
+	    if( this.canvas && this.canvas.getObjects().indexOf(this) !== -1 ){
+		this.canvas.sendObjectToBack(this);
+	    }
 	    return this;
 	};
     }
