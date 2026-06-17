@@ -14756,14 +14756,21 @@ JS9.Fabric._updateShape = function(layerName, obj, ginfo, mode, opts){
     dpos = obj.getCenterPoint();
     gpos = {x: 0, y: 0};
     if( ginfo.group ){
-	// in a group, the display pos is relative to group pos,
-	// so we need to add them together
-	gpos = ginfo.group.getCenterPoint();
-	dpos = {x: gpos.x + (dpos.x * ginfo.group.scaleX),
-		y: gpos.y + (dpos.y * ginfo.group.scaleY)};
-	// also need to rotate the position by the group angle
-	if( ginfo.group.angle ){
-	    dpos = JS9.rotatePoint(dpos, ginfo.group.angle, gpos);
+	// fabric v5: a child's getCenterPoint() is RELATIVE to its group, so we
+	// compose it with the group's position/scale/angle. fabric v6+ already
+	// returns the canvas-absolute center (getCenterPoint walks the parent
+	// transforms), so repeating it here would double-count the group
+	// transform -> wrong coords for multi-selected / grouped regions.
+	// (angle and scaleX/Y stay relative in v6+, so those are still composed
+	// below; only the POSITION must not be re-composed.)
+	if( fabric.major_version < 6 ){
+	    gpos = ginfo.group.getCenterPoint();
+	    dpos = {x: gpos.x + (dpos.x * ginfo.group.scaleX),
+		    y: gpos.y + (dpos.y * ginfo.group.scaleY)};
+	    // also need to rotate the position by the group angle
+	    if( ginfo.group.angle ){
+		dpos = JS9.rotatePoint(dpos, ginfo.group.angle, gpos);
+	    }
 	}
 	// is the group contained in an active selection??
 	if( ginfo.group.type !== "activeSelection" ){
@@ -14779,7 +14786,10 @@ JS9.Fabric._updateShape = function(layerName, obj, ginfo, mode, opts){
 		}
 	    }
 	    if( !apos ){ agroup = null; }
-	    if( agroup ){
+	    // v6+ getCenterPoint() already includes this nested transform too;
+	    // only compose the active-selection position for v5 (agroup is still
+	    // detected for the angle adjustment further down).
+	    if( agroup && fabric.major_version < 6 ){
 		dpos = {x: apos.x + (dpos.x * agroup.scaleX),
 			y: apos.y + (dpos.y * agroup.scaleY)};
 		if( agroup.angle ){

@@ -80,6 +80,18 @@ Two related fixes live **outside** that block:
   methods** added to `fabric.Object.prototype` — they are **not** fabric APIs.
   Adding *methods* to the prototype still works fine in v7; only default
   *values* must move to `ownDefaults`. No action needed.
+- **`_updateShape` group/parent position composition** (`js9.js:14756–14800`) is
+  a **code change, not a shim**. In v6+ a child's `getCenterPoint()` returns the
+  canvas-absolute center (it walks the parent group / active-selection
+  transforms), whereas in v5 it was group-relative. The manual position
+  composition (`gpos` group branch and the nested `agroup` active-selection
+  branch) is now guarded by `if( fabric.major_version < 6 )` (`js9.js:14766`,
+  `js9.js:14792`); for v6+, `dpos = obj.getCenterPoint()` (`js9.js:14756`) is
+  used directly. **Angle** and **size** composition were left unchanged (a
+  child's `angle`/`scaleX` stay relative in v6+), and `agroup` is still detected
+  for v6+ so the angle adjustment still runs. Verified FAIL→PASS by a headless
+  Playwright test on the real v7 build (see the "Open questions / to review"
+  resolved note and the test procedure at the end of this doc).
 
 ---
 
@@ -227,17 +239,51 @@ Notes:
 > `obj.sendToBack`, `canvas.bringToFront`, `fabric.devicePixelRatio`) are now
 > **shimmed** in the compat block (section 2) and are no longer open.
 
-1. **Group / parent coordinate semantics.** The v6 LayoutManager rewrite means
-   `getCenterPoint` for objects inside groups / active-selections now returns
-   **canvas-absolute** coordinates. This interacts with JS9's manual
-   group-coordinate math in `_updateShape` and with its mix of `obj.group`,
-   `obj.parent`, and JS9's own `params.parent`. **Flag for browser
-   verification — not yet resolved.** A concrete test procedure is at the end of
-   this document.
+1. **Group / parent coordinate semantics — RESOLVED (FIXED & verified).** The v6
+   LayoutManager rewrite means `getCenterPoint` for objects inside groups /
+   active-selections now returns **canvas-absolute** coordinates (it walks the
+   parent group / active-selection transforms), whereas v5 returned
+   **group-relative** ones. JS9's manual group-coordinate math in `_updateShape`
+   double-counted the group transform under v7, giving **wrong coords** for
+   multi-selected and user-grouped regions after a move/scale/rotate.
+
+   **Fixed** in `_updateShape` (`js9.js:14756–14800`): the **POSITION**
+   composition is now guarded by `if( fabric.major_version < 6 )` — both the
+   `gpos` group branch (`js9.js:14766`) and the nested `agroup` active-selection
+   branch (`js9.js:14792`). For v6+, `dpos = obj.getCenterPoint()`
+   (`js9.js:14756`) is used directly because it is already canvas-absolute. The
+   **ANGLE** composition (`pub.angle -= group.angle` / `-= agroup.angle`) and the
+   **SIZE** composition (`scalex *= group.scaleX`) are **left unchanged**, because
+   in v6+ a child's `angle` and `scaleX` remain **relative** (verified at
+   runtime), so JS9 must still add them. The `agroup` active-selection is still
+   **detected** for v6+ (so the angle adjustment still runs); only its position
+   re-composition is skipped. See also the new code-change row in section 2.
+
+   **Verified:** an automated headless Playwright test drove the actual v7 build
+   and confirmed FAIL→PASS. Before the fix, moving a multi-selected pair of
+   circles (image x 250/350) by +60px reported x 625/725 (moved +375,
+   double-counted); after the fix it reports 310/410 (correct +60). All five
+   scenarios now **PASS**: annulus (group) move, multi-select move, GroupRegions
+   move, multi-select scale ×2 (radii 20→40, x spread 250/350→200/400), and
+   multi-select rotate 90° (positions rotate correctly about the center, not
+   doubled). Single regions and top-level annulus/cross were always fine. The
+   test procedure at the end of this document is retained as the way to
+   re-verify.
 
 ---
 
 ## Test procedure: group / parent coordinate semantics
+
+> **Status: FIXED & verified** on the `fabric-v7-upgrade` branch. The
+> `_updateShape` position composition was guarded with
+> `if( fabric.major_version < 6 )` (`js9.js:14756–14800`, guards at
+> `js9.js:14766` and `js9.js:14792`); for v6+, `obj.getCenterPoint()` is used
+> directly (it is already canvas-absolute). A headless Playwright test on the
+> real v7 build confirmed FAIL→PASS: a multi-select +60px move that previously
+> reported x 625/725 (double-counted) now reports 310/410 (correct +60). All
+> five scenarios — annulus move, multi-select move, GroupRegions move,
+> multi-select scale ×2, multi-select rotate 90° — now **PASS**. The procedure
+> below is retained as the way to **re-verify**; it now passes on this branch.
 
 **Goal:** confirm whether the Fabric v6/v7 group-coordinate rewrite broke JS9's
 region geometry.
