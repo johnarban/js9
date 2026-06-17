@@ -12698,20 +12698,32 @@ JS9.Fabric.newShapeLayer = function(layerName, layerOpts, divjq){
 	    }
 	}
     });
-    // selection cleared
-    // v5: why does this work differently from the selection: events above???
-    // (i.e. still utilizes obj.target instead of obj.selected)
+    // selection cleared. fabric v4 supplied opts.target; fabric v6+ supplies
+    // opts.deselected[] (the object(s) being cleared) instead. Without the
+    // v6+ branch the deselect cleanup never runs -- region "unselect" updates,
+    // the multi-select dialog, and (most visibly) polygon edit-anchor removal,
+    // so polygon edit handles never go away after you deselect a polygon.
     dlayer.canvas.on("before:selection:cleared", (opts) => {
 	let obj;
 	if( JS9.globalOpts.skipSelectionProcessing ){ return; }
-	// sanity check
-	if( !opts.target ){ return; }
-	obj = opts.target;
-	if(  obj.type === "activeSelection"        ||
-	     (obj.type === "group" && !obj.params) ){
-	    selmultioff(dlayer, opts);
-	} else {
-	    seloff(dlayer, obj);
+	if( opts.target ){
+	    // fabric v4
+	    obj = opts.target;
+	    if(  obj.type === "activeSelection"        ||
+		 (obj.type === "group" && !obj.params) ){
+		selmultioff(dlayer, opts);
+	    } else {
+		seloff(dlayer, obj);
+	    }
+	} else if( opts.deselected && opts.deselected.length ){
+	    // fabric v6+
+	    obj = opts.deselected[0];
+	    if(  obj.type === "activeSelection"        ||
+		 (obj.type === "group" && !obj.params) ){
+		selmultioff(dlayer, opts);
+	    } else {
+		seloff(dlayer, obj);
+	    }
 	}
     });
     // if canvas moves (e.g. light window), calcOffset must be called ...
