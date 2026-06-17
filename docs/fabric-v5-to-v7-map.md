@@ -66,16 +66,20 @@ defined on `StaticCanvas.prototype`, which `Canvas` inherits):
 
 Two related fixes live **outside** that block:
 
-- **Global object defaults** (`js9.js:~28350`, loop at 28353–28368). The
-  `JS9.Fabric.opts` → defaults loop writes each key both onto
-  `fabric.Object.prototype[key]` **and** into
-  `fabric.InteractiveFabricObject.ownDefaults[key]` (`js9.js:28365`), because v7
-  reads per-instance defaults from `ownDefaults`, not the prototype. The loop
-  also **skips the `"canvas"` key** (`js9.js:28359`): putting
+- **Global object defaults** (`js9.js:~28400`, loop at 28404–28412). The
+  `JS9.Fabric.opts` → defaults loop is now **version-gated** so it writes each
+  key to **only the live target**: in v6+ to
+  `fabric.InteractiveFabricObject.ownDefaults[key]`, in v5 and earlier to
+  `fabric.Object.prototype[key]` (`js9.js:28406–28411`). It previously wrote
+  **both**, but the prototype write was **dead in v6+** — v6+ ignores the Object
+  prototype at construction and reads per-instance defaults from `ownDefaults`
+  (nothing in JS9 reads the prototype defaults directly). The loop still
+  **skips the `"canvas"` key** (`js9.js:28405`): putting
   `obj.canvas = {selection:true}` on every object breaks v7's `add()` —
   `_onObjectAdded` calls `obj.canvas.remove()` whenever `obj.canvas` is set, so a
   non-canvas value throws *"canvas.remove is not a function"* (also surfaces via
-  `findControl()`).
+  `findControl()`). Verified headless: a region still picks up
+  `borderColor` #00EEFF etc. from `ownDefaults`.
 - **`rescaleBorder` / `rescaleEvenly`** (`js9.js:12155–12156`) are **JS9's own custom
   methods** added to `fabric.Object.prototype` — they are **not** fabric APIs.
   Adding *methods* to the prototype still works fine in v7; only default
@@ -230,6 +234,46 @@ Notes:
   `js9.js:~12644–12679`).
 - **Object-level events** `obj.on("moving" | "scaling" | "rotating")`
   (`js9.js:16147`, `js9.js:16158–16164`) still fire in v7 (verified).
+
+---
+
+## Design rationale / lessons
+
+How these patches are meant to fit together — read before adding another, so the
+next maintainer doesn't re-introduce bugs by stacking renames.
+
+- **One block, one place.** All v6/v7 API shims live in a single guarded block
+  `if( fabric.major_version >= 6 ){ ... }` near the top of the fabric section in
+  `js9.js` (the compat block, section 2). Add new shims **there**, each guarded
+  with an `if( !already-defined )` check, not scattered across call sites.
+- **Golden rule: replicate v5 *semantics*, not just the name.** A shim that only
+  renames the call is a bug waiting to happen. Concrete case: the
+  `sendToBack`/`bringToFront` shims must **guard canvas membership**, because
+  fabric's `sendObjectToBack`/`bringObjectToFront` **INSERT** a non-member into
+  `canvas._objects`. A naive rename left an orphan, selectable **"selection
+  frame"** on the canvas after moving a multi-selection.
+- **Event payloads changed shape (target → arrays).** v6 changed several event
+  payloads from a single `opts.target` to arrays: `selection:created` /
+  `selection:updated` → `opts.selected`, `before:selection:cleared` →
+  `opts.deselected`; mouse events also dropped `opts.e.button`. JS9's handlers
+  branch on `opts.target` (legacy) vs the array form (modern).
+  - *Not a v7 issue:* `selection:updated` only acts on `opts.selected` and
+    ignores `opts.deselected` (the object removed from a multi-selection). This
+    is **original JS9 behavior** — fabric **v5.2.1 also delivered
+    `deselected`** on `selection:updated` and JS9 ignored it there too, for
+    years, with no observed problem (a multi-selected polygon has no edit
+    anchors to leak, since they're stripped on multi-join; only minor
+    `shupdate("unselect")` bookkeeping is skipped). Left as-is — it is not a
+    regression introduced by the v7 upgrade.
+- **Group/active-selection geometry is mixed-frame.** In v6 a child's
+  `getCenterPoint()` is canvas-**ABSOLUTE**, while its `angle`/`scaleX` stay
+  **RELATIVE**. `_updateShape` therefore composes only angle/scale, and **never
+  re-composes position** in v6+ (the position composition is guarded
+  `if( fabric.major_version < 6 )`). Don't "fix" the position math back in.
+- **Defaults go on `ownDefaults`, not the prototype.** In v6+ set global object
+  defaults via `fabric.InteractiveFabricObject.ownDefaults` (the prototype is
+  ignored at construction). Never put **canvas-level** options (the `"canvas"`
+  key) on objects — it breaks `add()`.
 
 ---
 

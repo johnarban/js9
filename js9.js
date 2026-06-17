@@ -11926,8 +11926,16 @@ fabric.patch_version = parseFloat(fabric.version.split(".")[2]);
 // ---------------------------------------------------------------------
 // fabric v6/v7 compatibility shims
 //
-// fabric 6 was a full rewrite that removed several APIs JS9 relies on.
-// We restore them here so the rest of the JS9 code can stay unchanged.
+// fabric 6 was a full rewrite that removed/renamed several APIs JS9 relies
+// on. We restore them here, in one place, so the rest of JS9 (and the core
+// plugins) can stay unchanged.
+//
+// Rule when adding a shim: replicate the v5 *semantics*, not just the name.
+// A naive rename caused real bugs -- e.g. the v7 stacking call
+// sendObjectToBack() *inserts* a non-member into canvas._objects, so the
+// sendToBack/bringToFront shims below must guard membership or they leave an
+// orphan "selection frame" on the canvas. When in doubt, check what the v5
+// method actually did to canvas._objects / _activeObject / coordinates.
 // ---------------------------------------------------------------------
 if( fabric.major_version >= 6 ){
     // fabric v6 renamed the active-selection type from "activeSelection" to
@@ -28386,21 +28394,20 @@ JS9.init = function(){
     // if JS9 prefs have fabricOpts, transfer them to Fabric.opts
     if( {}.hasOwnProperty.call(JS9, "Fabric") ){
 	$.extend(true, JS9.Fabric.opts, JS9.fabricOpts);
-	// incorporate our fabric defaults into fabric itself
+	// incorporate our fabric defaults into fabric itself.
+	// - the "canvas" key is a canvas-level option ({selection:...}), not a
+	//   per-object property; in fabric v6+ putting it on objects breaks add()
+	//   (obj.canvas.remove is not a function), so it is skipped.
+	// - v6+ reads per-instance defaults from InteractiveFabricObject.ownDefaults
+	//   (the Object prototype is ignored at construction); v5 and earlier read
+	//   them from the Object prototype. Write only to the one that's live.
 	for( key of Object.keys(JS9.Fabric.opts) ){
-	    // the "canvas" key is a canvas-level option (e.g. {selection:true}),
-	    // not a per-object property. In fabric v6+ putting it on objects
-	    // breaks add(): _onObjectAdded calls obj.canvas.remove() whenever
-	    // obj.canvas is set, so a non-canvas value throws
-	    // "canvas.remove is not a function".
 	    if( key === "canvas" ){ continue; }
-	    fabric.Object.prototype[key] = JS9.Fabric.opts[key];
-	    // fabric v6+ reads per-instance defaults from ownDefaults, not from
-	    // the prototype, so global shape defaults must be set there too.
-	    if( fabric.InteractiveFabricObject &&
-		fabric.InteractiveFabricObject.ownDefaults ){
+	    if( fabric.major_version >= 6 ){
 		fabric.InteractiveFabricObject.ownDefaults[key] =
 		    JS9.Fabric.opts[key];
+	    } else {
+		fabric.Object.prototype[key] = JS9.Fabric.opts[key];
 	    }
 	}
     }
