@@ -11855,6 +11855,164 @@ fabric.major_version = parseFloat(fabric.version.split(".")[0]);
 fabric.minor_version = parseFloat(fabric.version.split(".")[1]);
 fabric.patch_version = parseFloat(fabric.version.split(".")[2]);
 
+// ---------------------------------------------------------------------
+// fabric v6/v7 compatibility shims
+//
+// fabric 6 was a full rewrite that removed/renamed several APIs JS9 relies
+// on. We restore them here, in one place, so the rest of JS9 (and the core
+// plugins) can stay unchanged.
+//
+// Rule when adding a shim: replicate the v5 *semantics*, not just the name.
+// A naive rename caused real bugs -- e.g. the v7 stacking call
+// sendObjectToBack() *inserts* a non-member into canvas._objects, so the
+// sendToBack/bringToFront shims below must guard membership or they leave an
+// orphan "selection frame" on the canvas. When in doubt, check what the v5
+// method actually did to canvas._objects / _activeObject / coordinates.
+// ---------------------------------------------------------------------
+if( fabric.major_version >= 6 ){
+    // fabric v6 renamed the active-selection type from "activeSelection" to
+    // "activeselection" (the "type" getter lowercases the class name). JS9
+    // (and plugins) compare obj.type against the old camelCase string in ~20
+    // places, including the region geometry path (_selectShapes / getgroups /
+    // _updateShape), so multi-selected regions would otherwise get the wrong
+    // coordinates. fabric's own isActiveSelection() tests for
+    // "multiSelectionStacking" in the object, not the type string, so
+    // restoring the old value via the getter is safe.
+    Object.defineProperty(fabric.ActiveSelection.prototype, "type", {
+	get(){ return "activeSelection"; },
+	set(){ /* fabric warns and ignores; keep the same no-op */ },
+	configurable: true,
+	enumerable: true
+    });
+    // fabric.isTouchSupported was removed: recompute it ourselves
+    if( fabric.isTouchSupported === undefined ){
+	fabric.isTouchSupported =
+	    (typeof window !== "undefined" && "ontouchstart" in window) ||
+	    (typeof navigator !== "undefined" &&
+	     (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0));
+    }
+    // the hasRotatingPoint object flag was removed: the rotation handle is
+    // now the "mtr" control. Map the old flag onto control visibility so
+    // every existing get/set of hasRotatingPoint keeps working.
+    if( !Object.getOwnPropertyDescriptor(fabric.Object.prototype,
+					  "hasRotatingPoint") ){
+	Object.defineProperty(fabric.Object.prototype, "hasRotatingPoint", {
+	    get(){
+		return this.isControlVisible ? this.isControlVisible("mtr") : true;
+	    },
+	    set(v){
+		if( this.setControlVisible ){
+		    this.setControlVisible("mtr", !!v);
+		}
+	    },
+	    configurable: true,
+	    enumerable: true
+	});
+    }
+    // ActiveSelection.addWithUpdate() was removed: multiSelectAdd() is the
+    // v6 way to add an object to an active selection (it keeps canvas-plane
+    // coordinates and respects stacking order).
+    if( !fabric.ActiveSelection.prototype.addWithUpdate ){
+	fabric.ActiveSelection.prototype.addWithUpdate = function(obj){
+	    return this.multiSelectAdd(obj);
+	};
+    }
+    // ActiveSelection.toGroup() was removed: dissolve the selection (which
+    // restores each child to canvas-plane coordinates) and wrap the objects
+    // in a real Group at their current positions.
+    if( !fabric.ActiveSelection.prototype.toGroup ){
+	fabric.ActiveSelection.prototype.toGroup = function(){
+	    const canvas = this.canvas;
+	    const objects = this.getObjects().concat();
+	    if( !canvas ){
+		return new fabric.Group(objects);
+	    }
+	    canvas.discardActiveObject();
+	    canvas.remove(...objects);
+	    const group = new fabric.Group(objects);
+	    canvas.add(group);
+	    canvas.setActiveObject(group);
+	    canvas.requestRenderAll();
+	    return group;
+	};
+    }
+    // Group.toActiveSelection() was removed: pull the children out of the
+    // group (which restores their canvas-plane coordinates), drop the empty
+    // group, and wrap the children in an ActiveSelection.
+    if( !fabric.Group.prototype.toActiveSelection ){
+	fabric.Group.prototype.toActiveSelection = function(){
+	    const canvas = this.canvas;
+	    if( !canvas ){ return undefined; }
+	    const objects = this.getObjects().concat();
+	    this.removeAll();
+	    canvas.remove(this);
+	    objects.forEach((obj) => { canvas.add(obj); });
+	    const selection = new fabric.ActiveSelection(objects, {
+		canvas: canvas
+	    });
+	    canvas.setActiveObject(selection);
+	    canvas.requestRenderAll();
+	    return selection;
+	};
+    }
+    // canvas.setWidth(w)/setHeight(h) were removed: folded into setDimensions
+    // (which preserves the other dimension and recomputes the offset itself).
+    if( !fabric.StaticCanvas.prototype.setWidth ){
+	fabric.StaticCanvas.prototype.setWidth = function(value){
+	    return this.setDimensions({ width: value });
+	};
+    }
+    if( !fabric.StaticCanvas.prototype.setHeight ){
+	fabric.StaticCanvas.prototype.setHeight = function(value){
+	    return this.setDimensions({ height: value });
+	};
+    }
+    // object stacking moved onto the canvas and was renamed:
+    // canvas.sendToBack(obj)    -> canvas.sendObjectToBack(obj)
+    // canvas.bringToFront(obj)  -> canvas.bringObjectToFront(obj)
+    // NB: fabric's sendObjectToBack/bringObjectToFront UNSHIFT/PUSH the object
+    // into canvas._objects even if it isn't already there. An ActiveSelection
+    // lives in canvas._activeObject, NOT _objects, so calling these on it (e.g.
+    // JS9's sortOverlapping reorders the modified object, which can be the
+    // active selection) would inject it into _objects -> a leftover, selectable
+    // "selection frame" orphan after the selection is moved and cleared. So we
+    // only reorder objects that are actually members of the canvas.
+    if( !fabric.StaticCanvas.prototype.sendToBack ){
+	fabric.StaticCanvas.prototype.sendToBack = function(obj){
+	    if( obj && this.getObjects().indexOf(obj) !== -1 ){
+		this.sendObjectToBack(obj);
+	    }
+	    return this;
+	};
+    }
+    if( !fabric.StaticCanvas.prototype.bringToFront ){
+	fabric.StaticCanvas.prototype.bringToFront = function(obj){
+	    if( obj && this.getObjects().indexOf(obj) !== -1 ){
+		this.bringObjectToFront(obj);
+	    }
+	    return this;
+	};
+    }
+    // obj.sendToBack() (object method) was removed: route through its canvas
+    if( !fabric.Object.prototype.sendToBack ){
+	fabric.Object.prototype.sendToBack = function(){
+	    if( this.canvas && this.canvas.getObjects().indexOf(this) !== -1 ){
+		this.canvas.sendObjectToBack(this);
+	    }
+	    return this;
+	};
+    }
+    // fabric.devicePixelRatio was removed from the namespace (now
+    // fabric.config.devicePixelRatio). The magnifier still multiplies by the
+    // old name; without this it becomes NaN and drawImage silently drops the
+    // magnifier's region overlay.
+    if( fabric.devicePixelRatio === undefined ){
+	fabric.devicePixelRatio =
+	    (fabric.config && fabric.config.devicePixelRatio) ||
+	    (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    }
+}
+
 // fabric sub-object to hold fabric routines
 JS9.Fabric = {};
 
@@ -12480,20 +12638,32 @@ JS9.Fabric.newShapeLayer = function(layerName, layerOpts, divjq){
 	    }
 	}
     });
-    // selection cleared
-    // v5: why does this work differently from the selection: events above???
-    // (i.e. still utilizes obj.target instead of obj.selected)
+    // selection cleared. fabric v4 supplied opts.target; fabric v6+ supplies
+    // opts.deselected[] (the object(s) being cleared) instead. Without the
+    // v6+ branch the deselect cleanup never runs -- region "unselect" updates,
+    // the multi-select dialog, and (most visibly) polygon edit-anchor removal,
+    // so polygon edit handles never go away after you deselect a polygon.
     dlayer.canvas.on("before:selection:cleared", (opts) => {
 	let obj;
 	if( JS9.globalOpts.skipSelectionProcessing ){ return; }
-	// sanity check
-	if( !opts.target ){ return; }
-	obj = opts.target;
-	if(  obj.type === "activeSelection"        ||
-	     (obj.type === "group" && !obj.params) ){
-	    selmultioff(dlayer, opts);
-	} else {
-	    seloff(dlayer, obj);
+	if( opts.target ){
+	    // fabric v4
+	    obj = opts.target;
+	    if(  obj.type === "activeSelection"        ||
+		 (obj.type === "group" && !obj.params) ){
+		selmultioff(dlayer, opts);
+	    } else {
+		seloff(dlayer, obj);
+	    }
+	} else if( opts.deselected && opts.deselected.length ){
+	    // fabric v6+
+	    obj = opts.deselected[0];
+	    if(  obj.type === "activeSelection"        ||
+		 (obj.type === "group" && !obj.params) ){
+		selmultioff(dlayer, opts);
+	    } else {
+		seloff(dlayer, obj);
+	    }
 	}
     });
     // if canvas moves (e.g. light window), calcOffset must be called ...
@@ -14524,14 +14694,21 @@ JS9.Fabric._updateShape = function(layerName, obj, ginfo, mode, opts){
     dpos = obj.getCenterPoint();
     gpos = {x: 0, y: 0};
     if( ginfo.group ){
-	// in a group, the display pos is relative to group pos,
-	// so we need to add them together
-	gpos = ginfo.group.getCenterPoint();
-	dpos = {x: gpos.x + (dpos.x * ginfo.group.scaleX),
-		y: gpos.y + (dpos.y * ginfo.group.scaleY)};
-	// also need to rotate the position by the group angle
-	if( ginfo.group.angle ){
-	    dpos = JS9.rotatePoint(dpos, ginfo.group.angle, gpos);
+	// fabric v5: a child's getCenterPoint() is RELATIVE to its group, so we
+	// compose it with the group's position/scale/angle. fabric v6+ already
+	// returns the canvas-absolute center (getCenterPoint walks the parent
+	// transforms), so repeating it here would double-count the group
+	// transform -> wrong coords for multi-selected / grouped regions.
+	// (angle and scaleX/Y stay relative in v6+, so those are still composed
+	// below; only the POSITION must not be re-composed.)
+	if( fabric.major_version < 6 ){
+	    gpos = ginfo.group.getCenterPoint();
+	    dpos = {x: gpos.x + (dpos.x * ginfo.group.scaleX),
+		    y: gpos.y + (dpos.y * ginfo.group.scaleY)};
+	    // also need to rotate the position by the group angle
+	    if( ginfo.group.angle ){
+		dpos = JS9.rotatePoint(dpos, ginfo.group.angle, gpos);
+	    }
 	}
 	// is the group contained in an active selection??
 	if( ginfo.group.type !== "activeSelection" ){
@@ -14547,7 +14724,10 @@ JS9.Fabric._updateShape = function(layerName, obj, ginfo, mode, opts){
 		}
 	    }
 	    if( !apos ){ agroup = null; }
-	    if( agroup ){
+	    // v6+ getCenterPoint() already includes this nested transform too;
+	    // only compose the active-selection position for v5 (agroup is still
+	    // detected for the angle adjustment further down).
+	    if( agroup && fabric.major_version < 6 ){
 		dpos = {x: apos.x + (dpos.x * agroup.scaleX),
 			y: apos.y + (dpos.y * agroup.scaleY)};
 		if( agroup.angle ){
@@ -28116,9 +28296,21 @@ JS9.init = function(){
     // if JS9 prefs have fabricOpts, transfer them to Fabric.opts
     if( {}.hasOwnProperty.call(JS9, "Fabric") ){
 	$.extend(true, JS9.Fabric.opts, JS9.fabricOpts);
-	// incorporate our fabric defaults into fabric itself
+	// incorporate our fabric defaults into fabric itself.
+	// - the "canvas" key is a canvas-level option ({selection:...}), not a
+	//   per-object property; in fabric v6+ putting it on objects breaks add()
+	//   (obj.canvas.remove is not a function), so it is skipped.
+	// - v6+ reads per-instance defaults from InteractiveFabricObject.ownDefaults
+	//   (the Object prototype is ignored at construction); v5 and earlier read
+	//   them from the Object prototype. Write only to the one that's live.
 	for( key of Object.keys(JS9.Fabric.opts) ){
-	    fabric.Object.prototype[key] = JS9.Fabric.opts[key];
+	    if( key === "canvas" ){ continue; }
+	    if( fabric.major_version >= 6 ){
+		fabric.InteractiveFabricObject.ownDefaults[key] =
+		    JS9.Fabric.opts[key];
+	    } else {
+		fabric.Object.prototype[key] = JS9.Fabric.opts[key];
+	    }
 	}
     }
     delete JS9.fabricOpts;
