@@ -26,16 +26,25 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      
+          
+          
+  # Single deploy job since we're just deploying
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
-      - name: Create folder to deploy
-        run : |
-          mkdir deployment
+          
       - name: Move files to deployment folder
         run : |
           set -x
           pwd
+          ls
+          mkdir deployment
           cp src/js9/js9.html deployment/index.html
           cp src/js9/js9.css deployment/
           cp src/js9/js9support.css deployment/
@@ -48,23 +57,14 @@ jobs:
           cp src/js9/images/js9-apple-touch-icon.png deployment/
           cp src/js9/favicon.ico deployment/
           cp src/js9/js9prefs.js deployment/
-          
-          
-  # Single deploy job since we're just deploying
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+          ls deployment
+        
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
+          # Upload deployment folder
           path: './deployment'
       - name: Deploy to GitHub Pages
         id: deployment
